@@ -55,7 +55,7 @@ private:
 
   Type type;
   std::string name, externalPath;
-  std::uint64_t offset, size;
+  std::uint64_t offset, size = 0;
   bool created = false;
   bool deleted = false;
 
@@ -88,8 +88,8 @@ public:
   FolderHandle getParentFolder();
   void addFolder(std::string name);
   void addFile(std::string name, std::string path);
-  void extract(Entry &entry, std::string path);
   void remove(Entry &entry);
+  void extract(Entry &entry, std::string path);
 
 private:
   void remove(std::uint16_t index);

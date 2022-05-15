@@ -17,7 +17,7 @@ Archive::Archive(string path)
   : m_path(move(path))
 {
   m_file.open(m_path, ios_base::binary | ios_base::in | ios_base::out);
-  if(m_file.is_open())
+  if(m_file.is_open() && (m_file.seekg(0, ios_base::end).tellg() != 0))
   {
     loadFolders();
   }
@@ -293,6 +293,11 @@ void Folder::addFile(std::string name, std::string externalPath)
   setSynced(false);
 }
 
+void Folder::remove(Entry &entry)
+{
+  remove(&entry - &m_entries[0]);
+}
+
 void Folder::extract(Entry &entry, std::string path)
 {
   if(entry.type != Entry::Type::File)
@@ -304,11 +309,6 @@ void Folder::extract(Entry &entry, std::string path)
   m_archive->m_file.seekg(entry.offset);
   auto file = ofstream(path);
   copyFile(m_archive->m_file, file, entry.size);
-}
-
-void Folder::remove(Entry &entry)
-{
-  remove(&entry - &m_entries[0]);
 }
 
 void Folder::remove(uint16_t index)
