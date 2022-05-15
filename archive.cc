@@ -267,7 +267,7 @@ FolderHandle Folder::getParentFolder()
   return FolderHandle(m_archive, m_parentIndex);
 }
 
-void Folder::addFolder(std::string name)
+void Folder::addFolder(string name)
 {
   // 'm_archive->addFolder' may realloc folders container and invalidate 'this'
   auto self = FolderHandle(m_archive, m_selfIndex);
@@ -282,7 +282,7 @@ void Folder::addFolder(std::string name)
   self->setSynced(false);
 }
 
-void Folder::addFile(std::string name, std::string externalPath)
+void Folder::addFile(string name, string externalPath)
 {
   Entry entry;
   entry.type = Entry::Type::File;
@@ -298,7 +298,7 @@ void Folder::remove(Entry &entry)
   remove(&entry - &m_entries[0]);
 }
 
-void Folder::extract(Entry &entry, std::string path)
+void Folder::extract(Entry &entry, string path)
 {
   if(entry.type != Entry::Type::File)
     throw runtime_error("Folder::extract: Not a file!");
