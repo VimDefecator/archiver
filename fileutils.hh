@@ -15,7 +15,7 @@ namespace
   T convertEndianness(T number)
   {
     T res;
-    unsigned char *bytes = reinterpret_cast<unsigned char*>(&number);
+    unsigned char *bytes = reinterpret_cast<std::uint8_t*>(&number);
     for(int i = 0; i < sizeof(T); i++)
     {
       res <<= 8;

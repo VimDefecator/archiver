@@ -7,9 +7,9 @@
 #include <string>
 #include <functional>
 #include <cstdint>
+#include <iterator>
 
 class Folder;
-class Entry;
 class FolderHandle;
 
 class Archive
@@ -29,16 +29,18 @@ private:
   void syncSize();
   void setSynced(bool synced);
 
-  std::string m_path;
-  std::fstream m_file;
-  std::uint64_t m_endDataOffset;
-  std::vector<Folder> m_folders;
-  std::vector<Folder> m_deletedFolders;
-  bool m_synced;
+  std::string path_;
+  std::fstream file_;
+  std::uint64_t endDataOffset_;
+  std::vector<Folder> folders_;
+  std::vector<Folder> deletedFolders_;
+  bool synced_;
 
   friend class Folder;
   friend class FolderHandle;
 };
+
+class Entries;
 
 class Entry
 {
@@ -61,6 +63,64 @@ private:
 
   friend class Folder;
   friend class Archive;
+  friend class Entries;
+};
+
+class Entries
+{
+public:
+  Entries(const std::vector<Entry> &entries)
+    : entries_(entries)
+  {
+  }
+
+  class Iterator
+  {
+  public:
+    using iterator_category = std::input_iterator_tag;
+    using difference_type   = std::vector<Entry>::const_iterator::difference_type;
+    using value_type        = std::vector<Entry>::const_iterator::value_type;
+    using pointer           = std::vector<Entry>::const_iterator::pointer;
+    using reference         = std::vector<Entry>::const_iterator::reference;
+
+    Iterator(std::vector<Entry>::const_iterator it,
+             std::vector<Entry>::const_iterator endIt)
+      : it_(it), endIt_(endIt)
+    {
+    }
+
+    bool operator!=(const Iterator &other) {
+      return it_ != other.it_;
+    }
+    const Entry& operator*() {
+      return *it_;
+    }
+    const Entry& operator->() {
+      return *it_;
+    }
+    Iterator operator++() {
+      do ++it_; while(it_ != endIt_ && it_->deleted);
+      return *this;
+    }
+    Iterator operator++(int) {
+      auto prev = *this;
+      ++*this;
+      return prev;
+    }
+
+  private:
+    std::vector<Entry>::const_iterator it_, endIt_;
+  };
+
+  Iterator begin() const {
+    return Iterator(entries_.begin(), entries_.end());
+  }
+  Iterator end() const {
+    return Iterator(entries_.end(), entries_.end());
+  }
+
+private:
+  const std::vector<Entry> &entries_;
 };
 
 class Folder
@@ -68,28 +128,14 @@ class Folder
 public:
   Folder(Archive *archive, std::uint16_t selfIndex);
 
-  void iterChildren(std::function<void(Entry&)> fn)
-  {
-    for(auto &entry : m_entries)
-      if(!entry.deleted)
-        fn(entry);
-  }
+  Entries getChildren() { return Entries(entries_); }
 
-  bool iterChildrenUntil(std::function<bool(Entry&)> fn)
-  {
-    for(auto &entry : m_entries)
-      if(!entry.deleted)
-        if(fn(entry))
-          return true;
-    return false;
-  }
-
-  FolderHandle getChildFolder(Entry &entry);
+  FolderHandle getChildFolder(const Entry &entry);
   FolderHandle getParentFolder();
   void addFolder(std::string name);
   void addFile(std::string name, std::string path);
-  void remove(Entry &entry);
-  void extract(Entry &entry, std::string path);
+  void remove(const Entry &entry);
+  void extract(const Entry &entry, std::string path);
 
 private:
   void remove(std::uint16_t index);
@@ -97,13 +143,13 @@ private:
   void write();
   void setSynced(bool synced);
 
-  Archive *m_archive;
-  std::uint16_t m_selfIndex;
-  std::uint16_t m_parentIndex;
-  std::vector<Entry> m_entries;
-  bool m_created = false;
-  bool m_deleted = false;
-  bool m_synced = false;
+  Archive *archive_;
+  std::uint16_t selfIndex_;
+  std::uint16_t parentIndex_;
+  std::vector<Entry> entries_;
+  bool created_ = false;
+  bool deleted_ = false;
+  bool synced_ = false;
 
   friend class Archive;
 };
@@ -112,20 +158,19 @@ class FolderHandle
 {
 public:
   FolderHandle(Archive *archive, std::uint16_t folderIndex)
-    : m_archive(archive)
-    , m_folderIndex(folderIndex)
+    : archive_(archive)
+    , folderIndex_(folderIndex)
   {
   }
 
   Folder *operator->()
   {
-    return &m_archive->m_folders[m_folderIndex];
+    return &archive_->folders_[folderIndex_];
   }
 
 private:
-  Archive *m_archive;
-  std::uint16_t m_folderIndex;
+  Archive *archive_;
+  std::uint16_t folderIndex_;
 };
 
 #endif
-

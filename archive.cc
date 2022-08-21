@@ -14,16 +14,16 @@ static constexpr int32_t folderTableOffset(int numFolders)
 }
 
 Archive::Archive(string path)
-  : m_path(move(path))
+  : path_(move(path))
 {
-  m_file.open(m_path, ios_base::binary | ios_base::in | ios_base::out);
-  if(m_file.is_open() && (m_file.seekg(0, ios_base::end).tellg() != 0))
+  file_.open(path_, ios_base::binary | ios_base::in | ios_base::out);
+  if(file_.is_open() && (file_.seekg(0, ios_base::end).tellg() != 0))
   {
     loadFolders();
   }
   else
   {
-    m_file.open(m_path, ios_base::binary | ios_base::in | ios_base::out | ios_base::trunc);
+    file_.open(path_, ios_base::binary | ios_base::in | ios_base::out | ios_base::trunc);
     addFolder(0);
   }
 }
@@ -31,48 +31,48 @@ Archive::Archive(string path)
 uint16_t Archive::addFolder(uint16_t parentIndex)
 {
   int i = 0;
-  while(i < m_folders.size() && !m_folders[i].m_deleted)
+  while(i < folders_.size() && !folders_[i].deleted_)
     ++i;
 
-  if(i < m_folders.size())
-    m_folders[i].m_deleted = false;
+  if(i < folders_.size())
+    folders_[i].deleted_ = false;
   else
-    m_folders.emplace_back(this, i);
+    folders_.emplace_back(this, i);
 
-  m_folders[i].m_parentIndex = parentIndex;
-  m_folders[i].m_created = true;
+  folders_[i].parentIndex_ = parentIndex;
+  folders_[i].created_ = true;
   return i;
 }
 
 void Archive::removeFolder(uint16_t index)
 {
-  auto &folder = m_folders[index];
-  if(!folder.m_created)
-    m_deletedFolders.push_back(exchange(folder, Folder(this, index)));
+  auto &folder = folders_[index];
+  if(!folder.created_)
+    deletedFolders_.push_back(exchange(folder, Folder(this, index)));
   else
     folder = Folder(this, index);
-  folder.m_deleted = true;
+  folder.deleted_ = true;
 }
 
 void Archive::loadFolders()
 {
-  m_file.seekg(folderTableOffset(0), ios_base::end);
+  file_.seekg(folderTableOffset(0), ios_base::end);
 
-  auto numFolders = readNumber<uint16_t>(m_file);
-  m_endDataOffset = readNumber<uint64_t>(m_file);
+  auto numFolders = readNumber<uint16_t>(file_);
+  endDataOffset_ = readNumber<uint64_t>(file_);
 
-  m_file.seekg(folderTableOffset(numFolders), ios_base::end);
+  file_.seekg(folderTableOffset(numFolders), ios_base::end);
 
   auto folderOffsets = vector<int32_t>(numFolders);
   for(auto &offset : folderOffsets)
-    offset = readNumber<int32_t>(m_file);
+    offset = readNumber<int32_t>(file_);
 
-  m_folders.reserve(numFolders);
+  folders_.reserve(numFolders);
   for(int i = 0; i < folderOffsets.size(); ++i)
   {
-    m_folders.emplace_back(this, i);
-    auto &folder = m_folders.back();
-    m_file.seekg(folderOffsets[i], ios_base::end);
+    folders_.emplace_back(this, i);
+    auto &folder = folders_.back();
+    file_.seekg(folderOffsets[i], ios_base::end);
     folder.read();
   }
 
@@ -86,7 +86,7 @@ FolderHandle Archive::getRootFolder()
 
 void Archive::sync()
 {
-  if(!m_synced)
+  if(!synced_)
   {
     syncRemoveFiles();
     syncAddFiles();
@@ -102,28 +102,28 @@ void Archive::syncRemoveFiles()
 
   auto collectDeleted = [&](Folder &folder)
   {
-    if(!folder.m_synced)
-      for(auto &entry : folder.m_entries)
+    if(!folder.synced_)
+      for(auto &entry : folder.entries_)
         if(entry.type == Entry::Type::File && entry.deleted)
           skippedIntervals.emplace_back(entry.offset, entry.offset + entry.size);
   };
 
-  for(auto &folder : m_folders)
-    if(!folder.m_deleted && !folder.m_created)
+  for(auto &folder : folders_)
+    if(!folder.deleted_ && !folder.created_)
       collectDeleted(folder);
 
-  for(auto &folder : m_deletedFolders)
+  for(auto &folder : deletedFolders_)
     collectDeleted(folder);
 
   if(!skippedIntervals.empty())
   {
     sort(skippedIntervals.begin(), skippedIntervals.end(),
          [](auto interval1, auto interval2){return interval1.first < interval2.first;});
-    skippedIntervals.emplace_back(m_endDataOffset, m_endDataOffset);
+    skippedIntervals.emplace_back(endDataOffset_, endDataOffset_);
     auto numIntervals = skippedIntervals.size();
 
-    auto oldFile = fstream(m_path, ios_base::binary | ios_base::in);
-    m_file.seekp(skippedIntervals[0].first);
+    auto oldFile = fstream(path_, ios_base::binary | ios_base::in);
+    file_.seekp(skippedIntervals[0].first);
 
     for(int i = 1; i < numIntervals; ++i)
     {
@@ -131,16 +131,16 @@ void Archive::syncRemoveFiles()
       auto nextSkipFrom = skippedIntervals[i].first;
 
       oldFile.seekg(prevSkipTo);
-      copyFile(oldFile, m_file, nextSkipFrom - prevSkipTo);
+      copyFile(oldFile, file_, nextSkipFrom - prevSkipTo);
     }
 
     auto intervalSums = vector<uint64_t>(numIntervals, 0);
     for(int i = 1; i < numIntervals; ++i)
       intervalSums[i] = intervalSums[i-1] + skippedIntervals[i].second - skippedIntervals[i].first;
 
-    for(auto &folder : m_folders)
-      if(!folder.m_deleted && !folder.m_created)
-        for(auto &entry : folder.m_entries)
+    for(auto &folder : folders_)
+      if(!folder.deleted_ && !folder.created_)
+        for(auto &entry : folder.entries_)
           if(entry.type == Entry::Type::File && !entry.deleted && !entry.created)
           {
             auto nextIntervalIndex = upper_bound(skippedIntervals.begin(), skippedIntervals.end(), entry.offset,
@@ -149,43 +149,43 @@ void Archive::syncRemoveFiles()
             entry.offset -= intervalSums[nextIntervalIndex-1];
           }
 
-    m_endDataOffset = m_file.tellp();
+    endDataOffset_ = file_.tellp();
   }
 }
 
 void Archive::syncAddFiles()
 {
-  for(auto &folder : m_folders)
-    if(!folder.m_deleted && !folder.m_synced)
-      for(auto &entry : folder.m_entries)
+  for(auto &folder : folders_)
+    if(!folder.deleted_ && !folder.synced_)
+      for(auto &entry : folder.entries_)
         if(entry.type == Entry::Type::File && entry.created)
         {
           auto externalFile = fstream(entry.externalPath, ios_base::binary | ios_base::in);
-          entry.offset = m_file.tellp();
-          entry.size = copyFile(externalFile, m_file);
+          entry.offset = file_.tellp();
+          entry.size = copyFile(externalFile, file_);
         }
 
-  m_endDataOffset = m_file.tellp();
+  endDataOffset_ = file_.tellp();
 }
 
 void Archive::syncFolders()
 {
-  m_deletedFolders.clear();
+  deletedFolders_.clear();
 
-  while(m_folders.back().m_deleted)
-    m_folders.pop_back();
+  while(folders_.back().deleted_)
+    folders_.pop_back();
 
-  auto folderIndexRemap = vector<uint16_t>(m_folders.size());
-  for(int i = 0; i < m_folders.size(); ++i)
+  auto folderIndexRemap = vector<uint16_t>(folders_.size());
+  for(int i = 0; i < folders_.size(); ++i)
   {
-    if(m_folders[i].m_deleted)
+    if(folders_[i].deleted_)
     {
-      m_folders[i] = move(m_folders.back());
-      m_folders.pop_back();
-      folderIndexRemap[m_folders.size()] = i;
+      folders_[i] = move(folders_.back());
+      folders_.pop_back();
+      folderIndexRemap[folders_.size()] = i;
 
-      while(m_folders.back().m_deleted)
-        m_folders.pop_back();
+      while(folders_.back().deleted_)
+        folders_.pop_back();
     }
     else
     {
@@ -193,21 +193,21 @@ void Archive::syncFolders()
     }
   }
 
-  auto numFolders = uint16_t(m_folders.size());
+  auto numFolders = uint16_t(folders_.size());
   auto folderRelativeOffsets = vector<int32_t>(numFolders);
-  auto foldersSegmentOffset = m_file.tellp();
+  auto foldersSegmentOffset = file_.tellp();
 
   for(int i = 0; i < numFolders; ++i)
   {
-    auto &folder = m_folders[i];
-    folder.m_selfIndex = i;
-    folder.m_parentIndex = folderIndexRemap[folder.m_parentIndex];
-    for(auto it = folder.m_entries.begin();
-        it != folder.m_entries.end();)
+    auto &folder = folders_[i];
+    folder.selfIndex_ = i;
+    folder.parentIndex_ = folderIndexRemap[folder.parentIndex_];
+    for(auto it = folder.entries_.begin();
+        it != folder.entries_.end();)
     {
       if(it->deleted)
       {
-        it = folder.m_entries.erase(it);
+        it = folder.entries_.erase(it);
       }
       else
       {
@@ -217,68 +217,68 @@ void Archive::syncFolders()
       }
     }
 
-    folderRelativeOffsets[i] = int32_t(int64_t(m_file.tellp()) - int64_t(foldersSegmentOffset));
+    folderRelativeOffsets[i] = int32_t(int64_t(file_.tellp()) - int64_t(foldersSegmentOffset));
     folder.write();
   }
 
-  auto foldersSegmentLength = m_file.tellp() - foldersSegmentOffset;
+  auto foldersSegmentLength = file_.tellp() - foldersSegmentOffset;
 
   for(auto &relativeOffset : folderRelativeOffsets)
   {
     auto off = int32_t(folderTableOffset(numFolders) - foldersSegmentLength + relativeOffset);
-    writeNumber(m_file, off);
+    writeNumber(file_, off);
   }
 
-  writeNumber(m_file, numFolders);
-  writeNumber(m_file, m_endDataOffset);
+  writeNumber(file_, numFolders);
+  writeNumber(file_, endDataOffset_);
 }
 
 void Archive::syncSize()
 {
-  auto newSize = m_file.tellp();
-  m_file.close();
-  filesystem::resize_file(m_path, newSize);
-  m_file.open(m_path, ios_base::binary | ios_base::in | ios_base::out);
+  auto newSize = file_.tellp();
+  file_.close();
+  filesystem::resize_file(path_, newSize);
+  file_.open(path_, ios_base::binary | ios_base::in | ios_base::out);
 }
 
 void Archive::setSynced(bool synced)
 {
-  if((m_synced = synced))
-    for(auto &folder : m_folders)
+  if((synced_ = synced))
+    for(auto &folder : folders_)
       folder.setSynced(true);
 }
 
 Folder::Folder(Archive *archive, uint16_t selfIndex)
-  : m_archive(archive)
-  , m_selfIndex(selfIndex)
+  : archive_(archive)
+  , selfIndex_(selfIndex)
 {
 }
 
-FolderHandle Folder::getChildFolder(Entry &entry)
+FolderHandle Folder::getChildFolder(const Entry &entry)
 {
   if(entry.type != Entry::Type::Folder)
     throw runtime_error("Folder::getChildFolder: Not a folder!");
 
-  return FolderHandle(m_archive, entry.offset);
+  return FolderHandle(archive_, entry.offset);
 }
 
 FolderHandle Folder::getParentFolder()
 {
-  return FolderHandle(m_archive, m_parentIndex);
+  return FolderHandle(archive_, parentIndex_);
 }
 
 void Folder::addFolder(string name)
 {
-  // 'm_archive->addFolder' may realloc folders container and invalidate 'this'
-  auto self = FolderHandle(m_archive, m_selfIndex);
+  // 'archive_->addFolder' may realloc folders container and invalidate 'this'
+  auto self = FolderHandle(archive_, selfIndex_);
 
   Entry entry;
   entry.type = Entry::Type::Folder;
   entry.name = move(name);
-  entry.offset = m_archive->addFolder(m_selfIndex);
+  entry.offset = archive_->addFolder(selfIndex_);
   entry.created = true;
 
-  self->m_entries.push_back(move(entry));
+  self->entries_.push_back(move(entry));
   self->setSynced(false);
 }
 
@@ -289,16 +289,16 @@ void Folder::addFile(string name, string externalPath)
   entry.name = move(name);
   entry.externalPath = move(externalPath);
   entry.created = true;
-  m_entries.push_back(move(entry));
+  entries_.push_back(move(entry));
   setSynced(false);
 }
 
-void Folder::remove(Entry &entry)
+void Folder::remove(const Entry &entry)
 {
-  remove(&entry - &m_entries[0]);
+  remove(&entry - &entries_[0]);
 }
 
-void Folder::extract(Entry &entry, string path)
+void Folder::extract(const Entry &entry, string path)
 {
   if(entry.type != Entry::Type::File)
     throw runtime_error("Folder::extract: Not a file!");
@@ -306,26 +306,26 @@ void Folder::extract(Entry &entry, string path)
   if(entry.created)
     throw runtime_error("Folder::extract: Not added to archive yet!");
 
-  m_archive->m_file.seekg(entry.offset);
+  archive_->file_.seekg(entry.offset);
   auto file = ofstream(path);
-  copyFile(m_archive->m_file, file, entry.size);
+  copyFile(archive_->file_, file, entry.size);
 }
 
 void Folder::remove(uint16_t index)
 {
-  auto &entry = m_entries[index];
+  auto &entry = entries_[index];
 
   if(entry.type == Entry::Type::Folder)
   {
-    auto &childFolder = m_archive->m_folders[entry.offset];
-    for(int i = childFolder.m_entries.size() - 1; i >= 0; --i)
+    auto &childFolder = archive_->folders_[entry.offset];
+    for(int i = childFolder.entries_.size() - 1; i >= 0; --i)
       childFolder.remove(i);
 
-    m_archive->removeFolder(entry.offset);
+    archive_->removeFolder(entry.offset);
   }
 
   if(entry.created)
-    m_entries.erase(m_entries.begin() + index);
+    entries_.erase(entries_.begin() + index);
   else
     entry.deleted = true;
 
@@ -334,25 +334,25 @@ void Folder::remove(uint16_t index)
 
 void Folder::read()
 {
-  m_parentIndex = readNumber<uint16_t>(m_archive->m_file);
-  auto numEntries = readNumber<uint16_t>(m_archive->m_file);
-  m_entries = vector<Entry>(numEntries);
-  for(auto &entry : m_entries)
-    entry.read(m_archive->m_file);
+  parentIndex_ = readNumber<uint16_t>(archive_->file_);
+  auto numEntries = readNumber<uint16_t>(archive_->file_);
+  entries_ = vector<Entry>(numEntries);
+  for(auto &entry : entries_)
+    entry.read(archive_->file_);
 }
 
 void Folder::write()
 {
-  writeNumber(m_archive->m_file, m_parentIndex);
-  writeNumber(m_archive->m_file, uint16_t(m_entries.size()));
-  for(auto &entry : m_entries)
-    entry.write(m_archive->m_file);
+  writeNumber(archive_->file_, parentIndex_);
+  writeNumber(archive_->file_, uint16_t(entries_.size()));
+  for(auto &entry : entries_)
+    entry.write(archive_->file_);
 }
 
 void Folder::setSynced(bool synced)
 {
-  if(!(m_synced = synced))
-    m_archive->setSynced(false);
+  if(!(synced_ = synced))
+    archive_->setSynced(false);
 }
 
 void Entry::read(istream &in)

@@ -2,6 +2,7 @@
 #include <iomanip>
 #include <stack>
 #include <string>
+#include <algorithm>
 
 #include "archive.hh"
 
@@ -19,13 +20,13 @@ int main(int argc, char **argv)
     cin >> command;
     if(command == "list")
     {
-      currentFolder->iterChildren([](auto &entry)
+      for(const auto &entry : currentFolder->getChildren())
       {
         cout << setw(8) << left
              << (entry.getType() == Entry::Type::File ? "FILE:" : "FOLDER:")
              << entry.getName()
              << endl;
-      });
+      }
     }
     else if(command == "cd")
     {
@@ -37,15 +38,18 @@ int main(int argc, char **argv)
       }
       else
       {
-        auto success = currentFolder->iterChildrenUntil([&](auto &entry)
+        bool success = false;
+
+        for(const auto &entry : currentFolder->getChildren())
         {
           if(entry.getType() == Entry::Type::Folder && entry.getName() == name)
           {
             currentFolder = currentFolder->getChildFolder(entry);
-            return true;
+            success = true;
+            break;
           }
-          return false;
-        });
+        }
+
         if(!success)
           cout << "not found!\n";
       }
@@ -66,15 +70,19 @@ int main(int argc, char **argv)
     {
       string name, path;
       cin >> name >> path;
-      auto success = currentFolder->iterChildrenUntil([&](auto &entry)
+
+      bool success = false;
+
+      for(const auto &entry : currentFolder->getChildren())
       {
         if(entry.getType() == Entry::Type::File && entry.getName() == name)
         {
           currentFolder->extract(entry, path);
-          return true;
+          success = true;
+          break;
         }
-        return false;
-      });
+      }
+
       if(!success)
         cout << "not found!\n";
     }
@@ -82,15 +90,19 @@ int main(int argc, char **argv)
     {
       string name;
       cin >> name;
-      auto success = currentFolder->iterChildrenUntil([&](auto &entry)
+
+      bool success = false;
+      
+      for(const auto &entry : currentFolder->getChildren())
       {
         if(entry.getName() == name)
         {
           currentFolder->remove(entry);
-          return true;
+          success = true;
+          break;
         }
-        return false;
-      });
+      }
+
       if(!success)
         cout << "not found!\n";
     }
