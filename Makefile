@@ -1,9 +1,8 @@
-test: test.o archive.o
-	clang++ -std=c++20 -o test test.o archive.o
+CXX := clang++
+CXXFLAGS := -std=c++20
+CPPFLAGS := -MMD -MP
 
-test.o: test.cc archive.hh
-	clang++ -std=c++20 -c test.cc
+TARGETS := test
+UNITS_test := test archive
 
-archive.o: archive.cc archive.hh fileutils.hh
-	clang++ -std=c++20 -c archive.cc
-
+include Makefile.template
